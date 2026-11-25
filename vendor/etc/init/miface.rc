@@ -1,0 +1,12 @@
+on post-fs-data
+    mkdir /data/vendor/face 0775 system system
+    chown system system /data/vendor/face
+    chown system system /data/vendor/face/face_context
+    chown system system /data/vendor/face/face_info_8_0
+
+service vendor.miface /vendor/bin/hw/android.hardware.biometrics.face-service.tanzanite
+    class hal
+    user system
+    group system camera
+    seclabel u:r:hal_face_default:s0
+    interface aidl android.hardware.biometrics.face.IFace/default

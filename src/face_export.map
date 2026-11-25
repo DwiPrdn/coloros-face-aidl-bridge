@@ -1,0 +1,9 @@
+LIBBINDER_NDK {
+    global:
+        AServiceManager_addService;
+        AIBinder_transact;
+};
+LIBMEDIANDK {
+    global:
+        AImage_getPlaneData;
+};
