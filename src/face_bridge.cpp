@@ -16,9 +16,7 @@
 #include <vector>
 
 #define LOG_TAG "FaceAidlBridge"
-#define ALOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define ALOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
-#define ALOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#include "bridge_log.h"
 
 // Platform LL-NDK libbinder_ndk functions
 extern "C" {
@@ -507,7 +505,7 @@ int32_t AImage_getPlaneData(void* image, int planeIdx, uint8_t** data, int* data
     GetPlaneDataFn realFn = getRealGetPlaneData();
     if (!realFn) return -10000;
     int32_t ret = realFn(image, planeIdx, data, dataLength);
-    if (ret == 0 && planeIdx == 0 && data && *data && dataLength && *dataLength > 0) {
+    if (BRIDGE_DEBUG_ENABLED() && ret == 0 && planeIdx == 0 && data && *data && dataLength && *dataLength > 0) {
         timespec ts{};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         int64_t nowNs = static_cast<int64_t>(ts.tv_sec) * 1000000000LL + ts.tv_nsec;
@@ -725,8 +723,8 @@ int main(int argc, char** argv) {
         return runSelfTest();
     }
 
-    ALOGI("FaceAidlBridge v6 starting (uid=%u gid=%u, pinned-cb zero-collision libmiface bridge for ColorOS 17)...",
-          getuid(), getgid());
+    BRIDGE_LOG_BOOT("FaceAidlBridge v6 starting (uid=%u gid=%u, debug prop=%s)...",
+                    getuid(), getgid(), cos_bridge_log::kDebugPropName);
     ABinderProcess_setThreadPoolMaxThreadCount(4);
     ABinderProcess_startThreadPool();
 
@@ -734,9 +732,7 @@ int main(int argc, char** argv) {
     ALOGI("register_face_service() completed");
 
     miface::service::register_aon_service();
-    ALOGI("register_aon_service() completed");
-
-    ALOGI("Joining binder thread pool...");
+    BRIDGE_LOG_BOOT("Registered Face + AON services successfully!");
     ABinderProcess_joinThreadPool();
     ALOGE("ABinderProcess_joinThreadPool() exited unexpectedly!");
     return 1;

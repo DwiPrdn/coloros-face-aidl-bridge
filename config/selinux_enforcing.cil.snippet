@@ -1,0 +1,16 @@
+; Audited SELinux Enforcing CIL snippet for FaceAidlBridge v6 (VNDK 31 vendor -> Android 17 plat)
+; Runs inside native Xiaomi `hal_miface_default` domain (already a hal_face_server).
+; File context in vendor_file_contexts:
+;   /(vendor|system/vendor)/bin/hw/android\.hardware\.biometrics\.face-service\.tanzanite  u:object_r:hal_miface_default_exec:s0
+
+(allow cameraserver_31_0 hal_miface_default (binder (call transfer)))
+(allow hal_miface_default cameraserver_31_0 (binder (call transfer)))
+(allow hal_miface_default default_prop_31_0 (file (getattr map open read)))
+(allow system_server_31_0 hal_miface_default (binder (call transfer)))
+(allow hal_miface_default system_server_31_0 (binder (call transfer)))
+(allow platform_app_31_0 hal_miface_default (binder (call transfer)))
+(allow hal_miface_default platform_app_31_0 (binder (call transfer)))
+(allow system_app_31_0 hal_miface_default (binder (call transfer)))
+(allow hal_miface_default system_app_31_0 (binder (call transfer)))
+(allow priv_app_31_0 hal_miface_default (binder (call transfer)))
+(allow hal_miface_default priv_app_31_0 (binder (call transfer)))

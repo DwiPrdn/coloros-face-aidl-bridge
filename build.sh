@@ -17,7 +17,7 @@ mkdir -p "$(dirname "$OUT")"
   -Wl,--allow-shlib-undefined \
   -Wl,--version-script=src/face_export.map \
   -Wl,-rpath,/vendor/lib64 \
-  src/face_bridge.cpp "$LIBMIFACE" "$BINDER_NDK" -llog -ldl \
+  -Isrc src/face_bridge.cpp "$LIBMIFACE" "$BINDER_NDK" -llog -ldl -pthread \
   -o "$OUT"
 
 "$STRIP" --strip-unneeded "$OUT"

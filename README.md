@@ -1,6 +1,6 @@
 # ColorOS 17 Face Unlock AIDL V1 Bridge (`tanzanite`)
 
-A standalone, zero-`libc++_shared.so` native C++ AIDL V1 Face HAL proxy & linker-interposition bridge that adapts **Xiaomi's `libmiface.so`** (`android.hardware.biometrics.face.IFace/default` + `vendor.xiaomi.hardware.aon.IAlwaysOn/miaonservicebymiface`) to **ColorOS 17 (`FaceProviderExtImpl` & `FaceEnrollNewActivity`)** — enabling fast unlock, ColorOS custom binder commands, full circular enrollment progress animation, and zero crash/auto-cancel issues.
+A standalone, zero-`libc++_shared.so` native C++ AIDL V1 Face HAL proxy & linker-interposition bridge (`FaceAidlBridge v6`) that adapts **Xiaomi's `libmiface.so`** (`android.hardware.biometrics.face.IFace/default` + `vendor.xiaomi.hardware.aon.IAlwaysOn/miaonservicebymiface`) to **ColorOS 17 (`FaceProviderExtImpl` & `FaceEnrollNewActivity`)** — enabling fast unlock, ColorOS custom binder commands, full circular enrollment progress animation, SELinux Enforcing compatibility (`hal_miface_default`), and zero crash/auto-cancel issues.
 
 ---
 
@@ -11,7 +11,7 @@ A standalone, zero-`libc++_shared.so` native C++ AIDL V1 Face HAL proxy & linker
 | **Test Device** | Redmi Note 14 4G (`tanzanite`, SKU `tanzanite_n_gl`) |
 | **SoC / ABI** | MediaTek Helio G99-Ultra (`MT6789`), `arm64-v8a`, VNDK 31 |
 | **Display** | 1080×2400 AMOLED (`panel_o7_38_0c_0a_dsc_vdo`) |
-| **Kernel** | `5.10.269-EvernightKernel-Android-PERMISSIVE` |
+| **Kernel** | `5.10.251-HayaseYuuka-v3.4-MillenniumTeam+` (**SELinux Enforcing**) — also tested on `5.10.269-EvernightKernel-Android-PERMISSIVE` |
 | **Stock Firmware (Base Vendor)** | HyperOS 2 — `OS2.0.214.0.VOGEUXM` (`Redmi/tanzanite/tanzanite:12/SP1A.210812.016/OS2.0.214.0.VOGEUXM:user/release-keys`, Android 12 / SDK 31 vendor) |
 | **ColorOS Version** | ColorOS 17 (`V17.0.0`, Android 17 / SDK 37) |
 | **ColorOS Base ROM** | OnePlus Ace 5 Ultra CN (`PLC110`), `PLC110_11_A.01` (`PLC110_11.A.01_001_202610210112`, `CP2A.260605.016 release-keys`) |
@@ -35,12 +35,19 @@ A standalone, zero-`libc++_shared.so` native C++ AIDL V1 Face HAL proxy & linker
 
 | File Path | Action | Mode / Owner | SELinux Context |
 | :--- | :--- | :--- | :--- |
-| `vendor/bin/hw/android.hardware.biometrics.face-service.tanzanite` | **Added** | `0755` (`0:2000`) | `u:object_r:hal_face_default_exec:s0` |
+| `vendor/bin/hw/android.hardware.biometrics.face-service.tanzanite` | **Added** | `0755` (`0:2000`) | `u:object_r:hal_miface_default_exec:s0` |
 | `vendor/etc/init/miface.rc` | **Replaced** | `0644` (`0:0`) | `u:object_r:vendor_configs_file:s0` |
 | `vendor/etc/vintf/manifest/miface.xml` | **Kept / Reference** | `0644` (`0:0`) | `u:object_r:vendor_configs_file:s0` |
 
-### Required Stock Vendor Files (Keep Unmodified from Base Vendor)
-- `/vendor/lib64/libmiface.so` (and its stock Xiaomi camera/face dependencies; the binary sets `RUNPATH=/vendor/lib64` and links `libmiface.so` directly).
+> [!NOTE]
+> **SELinux Domain Change (`v1.1.0`)**: `miface.rc` runs the bridge in Xiaomi's native **`u:r:hal_miface_default:s0`** domain (instead of generic `hal_face_default`) so `libmiface.so` keeps all of its stock Xiaomi camera, gralloc, and TEE permissions under **SELinux Enforcing**.
+
+### Required Stock Vendor Files & ColorOS Feature XMLs
+- Stock `/vendor/lib64/libmiface.so` (and its stock Xiaomi camera/face dependencies; the binary sets `RUNPATH=/vendor/lib64` and links `libmiface.so` directly).
+- ColorOS feature declarations in `my_product/etc/`:
+  - `permissions/com.oplus.features.xml`: `<feature name="android.hardware.biometrics.face" />`
+  - `extension/com.oplus.oplus-feature.xml`: `<oplus-feature name="oplus.hardware.face.alternate_face_support"/>`
+  - `permissions/com.oplus.features_config.xml`: `<oplus-feature name="oplus.software.face_closeeye_detect"/>`
 
 ---
 
@@ -87,19 +94,30 @@ flowchart TD
    - Tracks `gLastProgressRem` (initialized to `5`).
    - Any intermediate `remaining > 0` is remapped in-place (`sz - 4`) monotonically to `4 -> 3 -> 2 -> 1`, guaranteeing `FaceEnrollNewActivity` always receives `remaining == 4` first.
    - On one-shot `remaining == 0` (`prev == 5`), synthesizes `remaining = 4` -> sleeps `500 ms` (waiting for ColorOS's `250 ms` start delay + `200 ms` circle fade-in to launch the Lottie ring) -> steps `3 -> 2 -> 1` at `200 ms` cadence -> forwards the real `remaining = 0` completion.
-5. **Diagnostic Y-Plane Luma Sampler (`AImage_getPlaneData`)**:
-   - Lightweight diagnostic hook sampling camera frame `#1, 5, 15, 30, 60` Y-plane min/max/mean brightness into `logcat` (`FaceAidlBridge`) with negligible overhead.
+5. **Runtime Debug Log & Y-Plane Luma Sampler (`bridge_log.h`)**:
+   - Quiet by default (zero idle Y-plane sampling overhead). Toggle live to log binder transactions and camera frame `#1, 5, 15, 30, 60` Y-plane min/max/mean brightness:
+     ```bash
+     adb shell setprop persist.vendor.cos.bridge.debug 1   # enable verbose logs + luma sampler
+     adb shell setprop persist.vendor.cos.bridge.debug 0   # silence verbose logs
+     ```
+
+---
+
+## SELinux Enforcing Policy
+
+See [`config/selinux_enforcing.cil.snippet`](config/selinux_enforcing.cil.snippet) for the audited Android 17 / VNDK 31 CIL rules for `hal_miface_default` (`cameraserver_31_0` binder IPC, `system_server`/`platform_app`/`system_app`/`priv_app` client pairs, and property reads).
 
 ---
 
 ## Installation (Vendor Overlay)
 
-1. Copy the files from `vendor/` (or the `v1.0.0` release archive) into your port's vendor tree:
+1. Copy the files from `vendor/` (or the `v1.1.0` release archive) into your port's vendor tree:
    - `vendor/bin/hw/android.hardware.biometrics.face-service.tanzanite`
    - `vendor/etc/init/miface.rc`
    - `vendor/etc/vintf/manifest/miface.xml` (verify it matches)
 2. Add the entries from [`config/vendor_fs_config.snippet`](config/vendor_fs_config.snippet) and [`config/vendor_file_contexts.snippet`](config/vendor_file_contexts.snippet).
-3. Repack `vendor.img`.
+3. If running **SELinux Enforcing**, merge [`config/selinux_enforcing.cil.snippet`](config/selinux_enforcing.cil.snippet) into your vendor SELinux policy (and recompile `precompiled_sepolicy`).
+4. Repack `vendor.img`.
 
 ---
 
@@ -118,16 +136,36 @@ Zero `libc++_shared.so` dependency (`-static-libstdc++`, `RUNPATH=/vendor/lib64`
 
 ## Verification & Self-Test
 
-On-device logs after booting:
 ```bash
-adb logcat -d -s FaceAidlBridge
+adb shell service check android.hardware.biometrics.face.IFace/default
+adb shell setprop persist.vendor.cos.bridge.debug 1
+adb logcat -s FaceAidlBridge
 # Expected during enrollment:
 #   IFace::createSession(..., origCb=0x...) -> transparent pass-through (pinned)
 #   ISessionCallback::onEnrollmentFrame(acq=23, vendor=7587) -> suppressed Xiaomi internal status
 #   Synthesizing ColorOS 5-step face progress (4->3->2->1->0) for id=...
 ```
 
-The source also includes a built-in `--self-test` mode verifying `createSession` callback pinning, synchronous `AParcel_readStatusHeader` reply on suppressed `7587/1001` frames, one-shot `[4,3,2,1,0]` synthesis, intermediate remapping, and `onSessionClosed` cleanup.
+The binary also supports `--self-test` verifying `createSession` callback pinning, synchronous `AParcel_readStatusHeader` reply on suppressed `7587/1001` frames, one-shot `[4,3,2,1,0]` synthesis, intermediate remapping, and `onSessionClosed` cleanup.
+
+---
+
+## Troubleshooting Guide
+
+Enable verbose logging + Y-plane camera frame brightness diagnostics first:
+```bash
+adb shell setprop persist.vendor.cos.bridge.debug 1
+adb logcat -s FaceAidlBridge FaceService miface
+```
+
+| Symptom | Likely Cause | How to Check & Fix |
+| :--- | :--- | :--- |
+| **No Face Unlock option in Settings** | Missing `android.hardware.biometrics.face` feature XML or `IFace/default` not registered | Run `adb shell pm list features \| grep biometrics.face` and `adb shell service check android.hardware.biometrics.face.IFace/default`. Check `miface.xml` is present in `/vendor/etc/vintf/manifest/`. |
+| **Service crashes immediately at boot (`cannot locate libmiface.so`)** | Missing `RUNPATH=/vendor/lib64` or stock `/vendor/lib64/libmiface.so` missing | Run `readelf -d vendor/bin/hw/android.hardware.biometrics.face-service.tanzanite \| grep -E 'NEEDED\|RUNPATH'` — must show `RUNPATH: [/vendor/lib64]` and NO `libc++_shared.so`. |
+| **Face enrollment shows black preview or fails to open front camera** | SELinux Enforcing blocking `hal_miface_default <-> cameraserver` or wrong `seclabel` (`hal_face_default` instead of `hal_miface_default`) | Run `adb shell ps -AZ \| grep face` (must be `u:r:hal_miface_default:s0`) and `adb logcat -d \| grep -E "avc:.*(miface\|face\|cameraserver)"`. Also check `FaceAidlBridge` Y-plane luma logs with `debug=1` (if `max=0`, camera frames are black). |
+| **Enrollment cancels itself after 1–2 seconds ("Failed to enroll")** | Linker interposition symbols not exported (`--version-script=src/face_export.map`), so `VENDOR 7587/1001` frames are hitting ColorOS's 5-strike auto-cancel | Verify `readelf --dyn-syms` exports `AServiceManager_addService@@LIBBINDER_NDK` and `AIBinder_transact@@LIBBINDER_NDK`. Check `FaceAidlBridge` log for `suppressed Xiaomi internal status`. |
+| **Enrollment succeeds instantly with blank/missing progress ring** | `gActiveFaceCb` pointer mismatch or `onEnrollmentProgress` not intercepted | Check `FaceAidlBridge` log for `Synthesizing ColorOS 5-step face progress (4->3->2->1->0)`. Ensure `-rdynamic -Wl,--version-script=src/face_export.map` was used in `build.sh`. |
+| **Works in SELinux Permissive but fails in Enforcing** | Missing `hal_miface_default` CIL rules or stale `precompiled_sepolicy` | Merge [`config/selinux_enforcing.cil.snippet`](config/selinux_enforcing.cil.snippet), recompile `vendor/etc/selinux/precompiled_sepolicy` with `secilc`, and audit `adb logcat -d \| grep avc:.*miface`. |
 
 ---
 
